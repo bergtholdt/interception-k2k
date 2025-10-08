@@ -3,7 +3,7 @@ TIMEOUT ?= 10
 
 CONFIG_DIR ?= default
 OUT_DIR := out
-INSTALL_DIR ?= /opt/interception
+INSTALL_DIR ?= /usr/local/bin
 
 TARGETS := $(addprefix $(OUT_DIR)/,$(notdir $(wildcard $(CONFIG_DIR)/*)))
 
