@@ -1,4 +1,5 @@
 # interception-k2k
+
 All-in-one input key mapper for [Interception Tools](https://gitlab.com/interception/linux/tools).
 
 ## Configuration
@@ -9,11 +10,12 @@ manage your rules if you need more instances of `interception-k2k`.
 
 If you wish to try out example configuration, modify `/etc/udevmon.yaml` to
 look something like this:
+
 ```yaml
 - JOB: "intercept -g $DEVNODE | /opt/interception/interception-pipe0 | /opt/interception/interception-pipe1 | uinput -d $DEVNODE"
   DEVICE:
-    EVENTS:
-      EV_KEY: [KEY_CAPSLOCK, KEY_ESC, KEY_SPACE]
+      EVENTS:
+          EV_KEY: [KEY_CAPSLOCK, KEY_ESC, KEY_SPACE]
 ```
 
 ## Installation
@@ -24,3 +26,30 @@ cd interception-k2k &&
 make && # or make CONFIG_DIR=caps2esc
 make install
 ```
+
+## My setup
+
+sudo tee -a /etc/udevmon.yaml > /dev/null <<EOT
+
+- JOB: "intercept -g $DEVNODE | /usr/local/bin/swapsies | /usr/local/bin/homerow | /usr/local/bin/caps2esc -m 1 | uinput -d $DEVNODE"
+  DEVICE:
+  EVENTS:
+  EV_KEY: [KEY_CAPSLOCK, KEY_ESC, KEY_LEFTCTRL, KEY_RIGHTCTRL]
+  EOT
+
+# /etc/systemd/system/udevmon.service
+
+sudo tee -a /etc/systemd/system/udevmon.service > /dev/null <<EOT
+[Unit]
+Description=udevmon
+Wants=systemd-udev-settle.service
+After=systemd-udev-settle.service
+
+[Service]
+ExecStart=/usr/bin/nice -n -20 /usr/local/bin/udevmon -c /etc/udevmon.yaml
+
+[Install]
+WantedBy=multi-user.target
+EOT
+
+sudo systemctl enable --now udevmon
