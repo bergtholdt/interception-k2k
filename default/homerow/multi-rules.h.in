@@ -1,6 +1,10 @@
 { .keys = { KEY_LEFTCTRL, KEY_X }, PRESS_ON_DOWN(KEY_CUT), DOWN_IFF_ALL_DOWN(1) },
-{ .keys = { KEY_LEFTCTRL, KEY_C }, PRESS_ON_DOWN(KEY_COPY), DOWN_IFF_ALL_DOWN(1) },
-{ .keys = { KEY_LEFTCTRL, KEY_V }, PRESS_ON_DOWN(KEY_PASTE), DOWN_IFF_ALL_DOWN(1) },
+/* Use the standard cross-platform Insert shortcuts so browsers, terminals,
+ * and remote Windows sessions all understand them. In the README pipeline
+ * the Apple Command key becomes KEY_LEFTCTRL before `homerow`, while physical
+ * right Control remains available for literal terminal Ctrl+C. */
+{ .keys = { KEY_LEFTCTRL, KEY_C }, CHORD_ON_DOWN(KEY_LEFTCTRL, KEY_INSERT), DOWN_IFF_ALL_DOWN(1) },
+{ .keys = { KEY_LEFTCTRL, KEY_V }, CHORD_ON_DOWN(KEY_LEFTSHIFT, KEY_INSERT), DOWN_IFF_ALL_DOWN(1) },
 { .keys = { KEY_LEFTCTRL, KEY_Z }, PRESS_ON_DOWN(KEY_UNDO), DOWN_IFF_ALL_DOWN(1) },
 { .keys = { KEY_LEFTCTRL, KEY_D }, PRESS(KEY_BACKSPACE), DOWN_IFF_ALL_DOWN(2), .repeated_key = KEY_BACKSPACE, .repeating_key = KEY_D },
 { .keys = { KEY_LEFTCTRL, KEY_F }, PRESS(KEY_DELETE), DOWN_IFF_ALL_DOWN(2), .repeated_key = KEY_DELETE, .repeating_key = KEY_F },

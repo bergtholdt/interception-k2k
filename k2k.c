@@ -82,10 +82,12 @@ static struct tap_rule {
  */
 static struct multi_rule {
     int const keys[8]; /** Keys to watch. */
-    int const down_press[2]; /** Press first key and release second key when
-                               toggled down. */
-    int const up_press[2]; /** Press first key and release second key when
-                             toggled up. */
+    int const down_seq[4]; /** Ordered key events to emit when toggled down.
+                             Positive values press a key, negative values
+                             release it. */
+    int const up_seq[4]; /** Ordered key events to emit when toggled up.
+                           Positive values press a key, negative values
+                           release it. */
     int const nbeforedown; /** Only allow toggling down after this many `keys`
                              have been down. Negative value means inequality. */
     int const nbeforeup; /** Only allow toggling up after this many `keys` have
@@ -101,18 +103,21 @@ static struct multi_rule {
     int repeating_key; /** The key that we saw last time to repeating. */
 } MULTI_RULES[] = {
 #define KEY_PAIR(key) { KEY_LEFT##key, KEY_RIGHT##key }
+#define RELEASE(key) (-(key))
 /* Press `key` when toggled down and once again when toggled up. */
-#define PRESS_ON_TOGGLE(key) .down_press = { (key),               (key) }, .up_press = { (key),               (key) }
+#define PRESS_ON_TOGGLE(key) .down_seq = { (key), RELEASE(key) }, .up_seq = { (key), RELEASE(key) }
 /* Act as `key`. */
-#define TO_KEY(key)          .down_press = { (key),        KEY_RESERVED }, .up_press = { KEY_RESERVED,        (key) }
+#define TO_KEY(key)          .down_seq = { (key) }, .up_seq = { RELEASE(key) }
 /* Press `key` once when toggled down. */
-#define PRESS_ON_DOWN(key)   .down_press = { (key),               (key) }, .up_press = { KEY_RESERVED, KEY_RESERVED }
+#define PRESS_ON_DOWN(key)   .down_seq = { (key), RELEASE(key) }
 /* Press `key` once when toggled up. */
-#define PRESS_ON_UP(key)     .down_press = { KEY_RESERVED, KEY_RESERVED }, .up_press = {        (key),        (key) }
+#define PRESS_ON_UP(key)     .up_seq = { (key), RELEASE(key) }
 /* Press once. */
 #define PRESS_ONCE(key)      PRESS_ON_DOWN
 /* Synonym for `TO_KEY`. */
 #define PRESS                TO_KEY
+/* Press a modifier chord once when toggled down. */
+#define CHORD_ON_DOWN(mod, key) .down_seq = { (mod), (key), RELEASE(key), RELEASE(mod) }
 
 /* Toggle down when all `keys` are down and toggle up as soon as not all `keys`
  * are down. `nkeys` need to specify the number of `keys` for technical
@@ -292,6 +297,48 @@ write_key_event(int code, int value) {
         .value = value
     };
     write_event(&e);
+}
+
+static void
+write_key_seq(int const *seq, int len) {
+    int i;
+
+    for (i = 0; i < len; ++i) {
+        int const step = seq[i];
+        if (step == KEY_RESERVED)
+            break;
+        write_key_event(step > 0 ? step : -step,
+                        step > 0 ? EVENT_VALUE_KEYDOWN : EVENT_VALUE_KEYUP);
+    }
+}
+
+static int
+seq_consume_event(int *seq, int len, int code, int value) {
+    int i;
+    int const step = (value == EVENT_VALUE_KEYDOWN ? code : -code);
+
+    for (i = 0; i < len; ++i) {
+        if (seq[i] == KEY_RESERVED)
+            break;
+        if (seq[i] == step) {
+            for (; i + 1 < len; ++i)
+                seq[i] = seq[i + 1];
+            seq[len - 1] = KEY_RESERVED;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int
+seq_is_hold_key(int const *down_seq, int const *up_seq, int *key) {
+    if (down_seq[0] > 0 && down_seq[1] == KEY_RESERVED
+            && up_seq[0] == -down_seq[0] && up_seq[1] == KEY_RESERVED) {
+        if (key != NULL)
+            *key = down_seq[0];
+        return 1;
+    }
+    return 0;
 }
 
 static int
@@ -539,29 +586,25 @@ main(void) {
             if (v->can_toggle && (!v->is_down
                         ? ndown == ntotal
                         : (v->nup >= 0 ? ndown == v->nup : ndown != -v->nup))) {
-                int press[2];
+                int seq[4];
 
                 v->is_down ^= 1;
-                memcpy(press, v->is_down ? v->down_press : v->up_press, sizeof press);
+                memcpy(seq, v->is_down ? v->down_seq : v->up_seq, sizeof seq);
 
                 nkeys = (v->is_down ? v->nbeforeup : v->nbeforedown);
                 v->can_toggle = (nkeys >= 0 ? ndown == nkeys : ndown != -nkeys);
 
                 dbgprintf("Multi rule #%d: %s now.", i, (v->is_down ? "Down" : "Up"));
 
-                if (!v->is_down) {
-                    if (press[0] != KEY_RESERVED)
-                        write_key_event(press[0], EVENT_VALUE_KEYDOWN);
-
-                    if (press[1] != KEY_RESERVED)
-                        write_key_event(press[1], EVENT_VALUE_KEYUP);
-                }
+                if (!v->is_down)
+                    write_key_seq(seq, ARRAY_LEN(seq));
 
                 for (j = 0; j < ntotal; ++j) {
                     if ((v->keys_down >> j) & 1) {
-                        /* Do not send release event if we will press it immediately (and vica-versa). */
-                        if (press[!v->is_down] == v->keys[j]) {
-                            press[!v->is_down] = KEY_RESERVED;
+                        /* Avoid bouncing the same key if the emitted sequence
+                         * already contains the opposite transition. */
+                        if (seq_consume_event(seq, ARRAY_LEN(seq), v->keys[j],
+                                              v->is_down ? EVENT_VALUE_KEYDOWN : EVENT_VALUE_KEYUP)) {
                             continue;
                         }
 
@@ -569,22 +612,19 @@ main(void) {
                     }
                 }
 
-                if (v->is_down) {
-                    if (press[0] != KEY_RESERVED)
-                        write_key_event(press[0], EVENT_VALUE_KEYDOWN);
-
-                    if (press[1] != KEY_RESERVED)
-                        write_key_event(press[1], EVENT_VALUE_KEYUP);
-                }
+                if (v->is_down)
+                    write_key_seq(seq, ARRAY_LEN(seq));
 
                 ignore = 1;
                 continue;
             } else if (v->is_down
                     && e.code == v->repeated_key
-                    && v->down_press[0] != KEY_RESERVED && v->down_press[1] == KEY_RESERVED
-                    && v->up_press[0]   == KEY_RESERVED && v->up_press[1]   == v->down_press[0]) {
+                    && seq_is_hold_key(v->down_seq, v->up_seq, NULL)) {
+                int repeated_key;
+
+                seq_is_hold_key(v->down_seq, v->up_seq, &repeated_key);
                 dbgprintf("Multi rule #%d: Repeated.", i);
-                e.code = v->down_press[0];
+                e.code = repeated_key;
                 break;
             } else if (v->is_down) {
                 dbgprintf("Multi rule #%d: Ignored matched key.", i);
